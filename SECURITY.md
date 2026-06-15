@@ -12,7 +12,7 @@ Versions that are supported w/ hotfixes
 
 You can report a vulnerability by:
 
-- emailing me at:           ody.chryssos (at) gmail (dot) com | Time untill response 2-3 days
+- emailing me at:           ody (dot) chryssos (at) gmail (dot) com | Time untill response 2-3 days
 
 - DMing me on discord:      goldengre                         | Time untill repsone 1 day
 
