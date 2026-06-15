@@ -1,3 +1,8 @@
+"""
+    golden's AuthServer by Odysseas Chryssos all right reserved | ody (dot) chryssos (at) gmail (dot) com
+    Available for commercial use under MIT License
+"""
+
 from os import urandom
 import random
 import string
