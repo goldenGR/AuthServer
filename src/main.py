@@ -10,14 +10,16 @@ from quarry.net.server import ServerFactory, ServerProtocol
 from quarry.types.chat import Message
 from twisted.internet import reactor
 from twisted.python import log
+from twisted.internet.threads import deferToThread
 import sys
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 from logTokens import logToken
 import configparser
 import base64
+import requests
 
-
+import hashlib
 key = RSA.generate(1024)
 config = configparser.RawConfigParser()
 config.read('server.properties', encoding='utf-8')
@@ -25,6 +27,18 @@ with open(config.get('ServerMessages', 'faviconPath').replace("\\n", "\n"), "rb"
     FAVICON = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
 
 log.startLogging(sys.stdout)
+
+def generate_server_id(base_server_id: str, public_key: bytes, secret_key: bytes) -> str:
+    digest = hashlib.sha1(
+        base_server_id.encode("iso-8859-1")
+        + secret_key
+        + public_key
+    ).digest()
+
+    # Java's BigInteger(byte[]) treats the bytes as signed, big-endian.
+    value = int.from_bytes(digest, byteorder="big", signed=True)
+
+    return format(value, "x")
 
 class AuthServerProtocol(ServerProtocol):
     
@@ -39,10 +53,33 @@ class AuthServerProtocol(ServerProtocol):
 
         self.send_packet(
             "login_encryption_request",
-            self.buff_type.pack_string("GLORY2HATEGROUP"),         
+            self.buff_type.pack_string("GLORY2HATEGROUP"),   # GLORY2HATEGROUP       
             pack_array(self.factory.public_key),     
             pack_array(self.verify_token)           
         )
+
+    def checkAuthServer(self, username, ip, shared_secret):
+        server_id = generate_server_id(
+            "GLORY2HATEGROUP",
+            self.factory.public_key,
+            shared_secret
+        )
+
+        url = "https://sessionserver.mojang.com/session/minecraft/hasJoined"
+        params = {
+                "username": username,
+                "serverId": server_id,
+        }
+        response = requests.get(
+            url,
+            params=params,
+            timeout=10
+        )
+        print("Public IP:", ip)
+        print("Hash:", server_id)
+        print("Status:", response.status_code)
+        print("Body:", response.text)
+        return response.status_code == 200
 
     def packet_login_encryption_response(self, buff):
         cipher = PKCS1_v1_5.new(self.factory.private_key)
@@ -62,8 +99,17 @@ class AuthServerProtocol(ServerProtocol):
 
         self.cipher.enable(shared_secret)
 
-        self.player_joined()
+        self.cipher.enable(shared_secret)
+        d = deferToThread(self.checkAuthServer, self.display_name,
+                        self.transport.getPeer().host, shared_secret)
+        d.addCallback(self._auth_done)
+        d.addErrback(lambda f: self.close("Authentication error"))
 
+    def _auth_done(self, ok):
+        if ok:
+            self.player_joined()
+        else:
+            self.close("Authentication failed")
     def player_joined(self):
                 
         code = ''.join(
@@ -112,7 +158,7 @@ class AuthServerFactory(ServerFactory):
 
         d["icon"] = FAVICON
 
-        print("STATUS DEBUG:", d["players"], "| favicon len:", len(d.get("favicon", "")))
+        print("STATUS DEBUG:", d["players"], "| favicon len:", len(d.get("icon", "")))
         self.send_packet("status_response", self.buff_type.pack_json(d))
 
 
