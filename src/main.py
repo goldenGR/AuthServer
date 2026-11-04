@@ -29,6 +29,12 @@ key = RSA.generate(1024)
 config = configparser.RawConfigParser()
 config.read(path.abspath('server.properties'), encoding='utf-8')
 
+iconPath = config.get('ServerMessages', 'faviconPath', fallback="icon.png")
+with open(iconPath, "rb") as image_file:
+    encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+
+favicon_uri = f"data:image/png;base64,{encoded_string}"
+
 # Logging functions
 LOGGING_ENABLED = bool(config.getboolean('Propperties', 'logging', fallback=False))
 log.startLogging(sys.stdout)
@@ -151,7 +157,7 @@ class AuthServerProtocol(ServerProtocol):
             d.addCallback(
                 lambda c: self.close(
                     Message.from_string(
-                        config.get('ServerMessages', 'kickmsg').replace("{code}", code).replace("\\n", "\n")
+                        config.get('ServerMessages', 'kickmsg', fallback="§6 You have authenticated! \n §3 Verification Code: {code}").replace("{code}", code).replace("\\n", "\n")
                         )
                     )
             )
@@ -169,12 +175,6 @@ class AuthServerProtocol(ServerProtocol):
             protocol_version = self.factory.force_protocol_version
             if protocol_version is None:
                 protocol_version = self.protocol_version
-
-            iconPath = config.get('ServerMessages', 'faviconPath', fallback="icon.png")
-            with open(iconPath, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-            
-            favicon_uri = f"data:image/png;base64,{encoded_string}"
     
             d = {
                 "description": {"text": self.factory.motd},
