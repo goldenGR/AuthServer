@@ -22,15 +22,17 @@ motd        | The MOTD of the server                                | [ServerMes
 kickmsg     | The message send to players containing the login code | [ServerMessages]
 mp          | Max players displayed for the server                  | [ServerMessages]
 op          | Online players displayed by the server                | [ServerMessages]
+faviconPath | The path of the favicon displayed onto the server     | [ServerMessages]
 rateWindow  | The time before ip block resets, in seconds           | [ConnectionConfig]
-maxAttempts | Max connect attempts per IP                           | [ConnectionConfig]
+maxAttempts | Max connection attempts per IP                        | [ConnectionConfig]
+maxPerPeer  | Max connected clients per peer                        | [ConnectionConfig]    
 
+> Note: favicon must be the standar minecraft 64x64 pixels size. kickmessage needs to contain ``{code}`` to display the generated code.
 # Setting up
 
 After you have finished with customizing the ``server.properties`` file, you can start off by creating the ``logToken`` function under the ``./src/logTokens`` file.
 
 > Note: currently it doesnt do anyting as you need to set it up with your backend database! Dont forget to add proper expiration of tokens :3
-
 #### Format
 ```py
 def logToken(UUID, token):
