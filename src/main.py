@@ -9,7 +9,7 @@ from pathlib import Path
 import secrets
 import string
 import uuid
-from quarry.net.server import ServerFactory, ServerProtocol, cached_property
+from quarry.net.server import ServerFactory, ServerProtocol
 from quarry.types.chat import Message
 from quarry.data import packets as qpackets
 from quarry.net.protocol import ProtocolError, protocol_modes
@@ -346,7 +346,7 @@ class AuthServerFactory(ServerFactory):
         self.attempt_log        = defaultdict(list)
         self.peer_connections   = defaultdict(int)
         self.cleanup_loop = LoopingCall(self.cleanupRateLimit)
-        self.cleanup_loop.start(60, now=False)
+        self.cleanup_loop.start(10, now=False)
 
     def cleanupRateLimit(self):
         now = time.time()
@@ -374,12 +374,14 @@ class AuthServerFactory(ServerFactory):
         return False
 
     def buildProtocol(self, addr) -> AuthServerProtocol:
-        logg("peer_connections", dict(self.peer_connections))
         ip = addr.host
         if self.peer_connections[ip] >= self.MAX_PERPEER:
             return None
         self.peer_connections[ip] += 1
         p = ServerFactory.buildProtocol(self, addr)
+        if p is None:
+            self.peer_connections[ip] -= 1
+            return None
         p.ip = ip
         return p
 
