@@ -7,12 +7,11 @@
 from os import urandom, path
 import secrets
 import string
-from quarry.net.server import ServerFactory, ServerProtocol
+from quarry.net.server import ServerFactory, ServerProtocol, cached_property
 from quarry.types.chat import Message
 from twisted.internet import reactor
 from twisted.python import log
 from twisted.internet.threads import deferToThread
-from twisted.protocols.policies import LimitConnectionsByPeer
 import time
 from collections import defaultdict
 import sys
@@ -26,13 +25,18 @@ import hashlib
 
 key = RSA.generate(1024)
 
+# Load config file
 config = configparser.RawConfigParser()
 config.read(path.abspath('server.properties'), encoding='utf-8')
-with open(config.get('ServerMessages', 'faviconPath').replace("\\n", "\n"), "rb") as f:
-    FAVICON = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
 
+# Logging functions
+LOGGING_ENABLED = bool(config.getboolean('Propperties', 'logging', fallback=False))
 log.startLogging(sys.stdout)
+def logg(msg):
+    if LOGGING_ENABLED:
+        log.msg(f"[AuthServer] {msg}")
 
+# Generate minecraft server id based on mojang's auth algo
 def generate_server_id(base_server_id: str, public_key: bytes, secret_key: bytes) -> str:
     digest = hashlib.sha1(
         base_server_id.encode("iso-8859-1")
@@ -44,7 +48,13 @@ def generate_server_id(base_server_id: str, public_key: bytes, secret_key: bytes
 
     return format(value, "x")
 
+# AuthServer protocol implementation
 class AuthServerProtocol(ServerProtocol):
+    def connection_lost(self, reason=None):
+        ip = self.transport.getPeer().host
+        if self.factory.peer_connections[ip] > 0:
+            self.factory.peer_connections[ip] -= 1
+        super().connection_lost(reason)
     
     def packet_login_start(self, buff):
         self.display_name = buff.unpack_string()
@@ -85,10 +95,10 @@ class AuthServerProtocol(ServerProtocol):
             data = response.json()
             self.UUID = data.get("id")
 
-        # print("Public IP:", ip)
-        # print("Hash:", server_id)
-        # print("Status:", response.status_code)
-        # print("Body:", response.text)
+        logg("Public IP:", ip)
+        logg("Hash:", server_id)
+        logg("Status:", response.status_code)
+        logg("Body:", response.text)
         return response.status_code == 200
 
     def packet_login_encryption_response(self, buff):
@@ -109,7 +119,7 @@ class AuthServerProtocol(ServerProtocol):
             return
 
         print("Client responded!")
-        print(f"VF: {verify_token} SS: {shared_secret}")
+        logg(f"VF: {verify_token} SS: {shared_secret}")
 
         if verify_token != self.verify_token:
             print("Token mismatch!")
@@ -135,35 +145,72 @@ class AuthServerProtocol(ServerProtocol):
         )
 
         try:
-            logToken(self.UUID, code)
+            # logToken(self.UUID, code)
+            d = deferToThread(logToken, self.UUID, code)
+            d.addCallback(
+                lambda c: self.close(
+                    Message.from_string(
+                        config.get('ServerMessages', 'kickmsg').replace("{code}", code).replace("\\n", "\n")
+                        )
+                    )
+            )
+            d.addErrback(
+                lambda e: self.close(
+                    Message.from_string("Internal server error")
+                    )
+                )
         except Exception as e:
-            print(f"Error logging token for UUID {self.UUID}: {e}")
+            logg(f"Error logging token for UUID {self.UUID}: {e}")
             self.close(Message.from_string("Internal server error"))
             return
 
-        self.close(
-            Message.from_string(
-                config.get('ServerMessages', 'kickmsg').replace("{code}", code).replace("\\n", "\n")
-            )
-        )
+    def packet_status_request(self, buff):
+            protocol_version = self.factory.force_protocol_version
+            if protocol_version is None:
+                protocol_version = self.protocol_version
+
+            iconPath = config.get('ServerMessages', 'faviconPath', fallback="icon.png")
+            with open(iconPath, "rb") as image_file:
+                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            favicon_uri = f"data:image/png;base64,{encoded_string}"
+    
+            d = {
+                "description": {"text": self.factory.motd},
+                "players": {
+                    "online": self.factory.online_players,
+                    "max": self.factory.max_players,
+                },
+                "version": {
+                    "name": "1.8.9",
+                    "protocol": protocol_version
+                }
+            }
+
+            d['favicon'] = favicon_uri
+    
+            self.send_packet("status_response", self.buff_type.pack_json(d))
+    
 
 
-class AuthServerFactory(LimitConnectionsByPeer, ServerFactory):
-    RATE_WINDOW = int(config.get('ConnectionConfig', 'rateWindow'))
-    MAX_ATTEMPTS = int(config.get('ConnectionConfig', 'maxAttempts'))
+# Auth server builder.
+class AuthServerFactory(ServerFactory):
+    RATE_WINDOW = int(config.get('ConnectionConfig', 'rateWindow', fallback=60))
+    MAX_ATTEMPTS = int(config.get('ConnectionConfig', 'maxAttempts', fallback=5))
+    MAX_PERPEER = int(config.get('ConnectionConfig', 'maxPerPeer', fallback=3))
 
     protocol = AuthServerProtocol
     online_mode = False
-    maxConnectionsPerPeer = MAX_ATTEMPTS 
 
-    motd = f"{config.get('ServerMessages', 'motd').replace("\\n", "\n")} \n §6Powered by goldens AuthServer"
-    max_players = int(config.get('ServerMessages', 'mp'))
-    online_players = int(config.get('ServerMessages', 'op'))
-
+    motd = f"{config.get('ServerMessages', 'motd', fallback='Verification Server').replace('\\n', '\\n')} \n §6Powered by goldens AuthServer"
+    max_players = int(config.get('ServerMessages', 'mp', fallback=500))
+    online_players = int(config.get('ServerMessages', 'op', fallback=67))
+            
     def __init__(self):
         super().__init__()
         self.attempt_log = defaultdict(list)
-    
+        self.peer_connections = defaultdict(int)
+
     def isIpRateLimited(self, ip) -> bool:
         now = time.time()
         attempts = self.attempt_log[ip]
@@ -173,29 +220,12 @@ class AuthServerFactory(LimitConnectionsByPeer, ServerFactory):
         attempts.append(now)
         return False
 
-    def packet_status_request(self, buff):
-        protocol_version = self.factory.force_protocol_version
-        if protocol_version is None:
-            protocol_version = self.protocol_version
-
-        d = {
-            "description": {"text": self.factory.motd},
-            "players": {
-                "online": self.factory.online_players,
-                "max": self.factory.max_players,
-                "sample": []
-            },
-            "version": {
-                "name": "1.8.9",
-                "protocol": protocol_version
-            }
-        }
-
-        d["icon"] = FAVICON
-
-        print("STATUS DEBUG:", d["players"], "| favicon len:", len(d.get("icon", "")))
-        self.send_packet("status_response", self.buff_type.pack_json(d))
-
+    def buildProtocol(self, addr):
+        ip = addr.host
+        if self.peer_connections[ip] >= self.MAX_PERPEER:
+            return None
+        self.peer_connections[ip] += 1
+        return ServerFactory.buildProtocol(self, addr)
 
 if __name__ == "__main__":
     factory = AuthServerFactory()
