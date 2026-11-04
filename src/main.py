@@ -32,9 +32,9 @@ config.read(path.abspath('server.properties'), encoding='utf-8')
 # Logging functions
 LOGGING_ENABLED = bool(config.getboolean('Propperties', 'logging', fallback=False))
 log.startLogging(sys.stdout)
-def logg(msg):
+def logg(*args, **kwargs):
     if LOGGING_ENABLED:
-        log.msg(f"[AuthServer] {msg}")
+        print("[AuthServer] ",*args, **kwargs)
 
 # Generate minecraft server id based on mojang's auth algo
 def generate_server_id(base_server_id: str, public_key: bytes, secret_key: bytes) -> str:
@@ -72,13 +72,12 @@ class AuthServerProtocol(ServerProtocol):
             pack_array(self.verify_token)           
         )
 
-    def checkAuthServer(self, username, ip, shared_secret):
+    def checkAuthServer(self, username, shared_secret):
         server_id = generate_server_id(
             "GLORY2HATEGROUP",
             self.factory.public_key,
             shared_secret
         )
-
         url = "https://sessionserver.mojang.com/session/minecraft/hasJoined"
         params = {
                 "username": username,
@@ -94,8 +93,6 @@ class AuthServerProtocol(ServerProtocol):
         if response.status_code == 200:
             data = response.json()
             self.UUID = data.get("id")
-
-        logg("Public IP:", ip)
         logg("Hash:", server_id)
         logg("Status:", response.status_code)
         logg("Body:", response.text)
@@ -128,10 +125,14 @@ class AuthServerProtocol(ServerProtocol):
 
         self.cipher.enable(shared_secret)
 
-        d = deferToThread(self.checkAuthServer, self.display_name,
-                        self.transport.getPeer().host, shared_secret)
+        d = deferToThread(self.checkAuthServer, self.display_name, shared_secret)
         d.addCallback(self._auth_done)
-        d.addErrback(lambda f: self.close(Message.from_string("Authentication error")))
+        def on_auth_error(failure):
+            logg(f"Auth error: {failure.getErrorMessage()}")
+            logg(failure.getTraceback())   # full traceback, optional
+            self.close(Message.from_string("Authentication error"))
+
+        d.addErrback(on_auth_error)
 
     def _auth_done(self, ok):
         if ok:
