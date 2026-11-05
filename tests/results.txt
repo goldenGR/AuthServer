@@ -1,0 +1,130 @@
+results (nov 4, ur latest commit, python 3.12 on debian)
+
+real joins with my acc (Mkevin_):
+1.21 original - got code RKAUT4JP, mojang 200
+1.19.2 original - Disconnected, no code, TypeError in the log (tried 2 times)
+1.19.2 with fix - got code JVCRCITZ, mojang 200
+1.8.9 with fix - got code 9Q2D9XH5, mojang 200
+
+some joins randomly got 503 (auth servers are down) or 204 (auth failed) from mojang even tho i joined fine. curled hasJoined directly from the same vm 10 times:
+
+204 503 503 503 503 204 204 204 204 503
+
+probably my vpn (cloudflare warp) but a retry would fix it anyway
+
+
+1.19.2 on the original server:
+
+python3 login1192.py token
+got packet id 1
+server reply: packet 0 -> {"text": "Authentication servers are down."}
+
+python3 login1192.py signature
+got packet id 1
+no reply: server closed the connection
+
+server log:
+  File ".../src/main.py", line 243, in packet_login_encryption_response
+    verify_token    = cipher.decrypt(verify_token_enc, None)
+  File ".../Crypto/Cipher/PKCS1_v1_5.py", line 148, in decrypt
+    if len(ciphertext) != k:
+builtins.TypeError: object of type 'NoneType' has no len()
+
+
+1.19.2 with the fix:
+
+python3 login1192.py signature
+got packet id 1
+server reply: packet 0 -> {"text": "Authentication failed"}
+
+
+all versions (with the fix):
+
+python3 versions.py
+1.7.10   (proto   5): ping ok  | kicked: Authentication failed
+1.8.9    (proto  47): ping ok  | kicked: Authentication failed
+1.12.2   (proto 340): ping ok  | kicked: Authentication failed
+1.16.5   (proto 754): ping ok  | kicked: Authentication failed
+1.17.1   (proto 756): ping ok  | kicked: Authentication failed
+1.18.2   (proto 758): ping ok  | kicked: Authentication failed
+1.19     (proto 759): ping ok  | kicked: Authentication failed
+1.19.2   (proto 760): ping ok  | kicked: Authentication failed
+1.19.4   (proto 762): ping ok  | kicked: Authentication failed
+1.20.1   (proto 763): ping ok  | kicked: Authentication failed
+1.20.4   (proto 765): ping ok  | kicked: Authentication failed
+1.20.6   (proto 766): ping ok  | kicked: Authentication failed
+1.21     (proto 767): ping ok  | kicked: Authentication failed
+1.21.4   (proto 769): ping ok  | kicked: Authentication failed
+1.21.8   (proto 772): ping ok  | kicked: Authentication failed
+1.21.10  (proto 773): ping ok  | kicked: Authentication failed
+
+no errors in the log
+
+
+limits and stuff (with the fix):
+
+python3 misc.py
+## 1) 4 idle connections from one IP (limit is 3)
+    ['open', 'open', 'open', 'closed']
+## 2) garbage data, then a normal ping still works?
+    garbage conn: open
+    bad length conn: open
+    ping after garbage: ok
+## 3) idle connection timeout: checking socks[0] every 10s for 40s
+    after 10s: open
+    after 20s: open
+    after 30s: closed
+    after 40s: closed
+
+rate limit works, 6th join in a minute got "You are being rate limited." the log also shows "Packet is too long: login_start" when that happens but its harmless, its just bc it returns before reading the packet
+
+
+--- update (nov 5) ---
+
+first fix just skipped the token check on 1.19-1.19.2 when the client sends a signature. worked but it didnt check anything there, so i changed it to actually check the signature with the player's chat key (same as vanilla)
+
+real joins with the updated fix:
+1.19.2 - got code KFIDRY1Q, mojang 200, no signature mismatch
+26.1 - got code TQ4CJPAP, mojang 200
+
+python3 sig119.py
+1.19   signed    : closed
+1.19   wrongkey  : kicked (plain): Authentication failed
+1.19   wrongtoken: kicked (plain): Authentication failed
+1.19   nokey     : kicked (plain): Authentication failed
+1.19.2 signed    : closed
+1.19.2 wrongkey  : kicked (plain): Authentication failed
+1.19.2 wrongtoken: kicked (plain): Authentication failed
+1.19.2 nokey     : kicked (plain): Authentication failed
+
+server log:
+Status: 204
+Signature mismatch!
+Signature mismatch!
+Signature mismatch!
+Status: 204
+Signature mismatch!
+Signature mismatch!
+Signature mismatch!
+
+signed = correct signature, goes on to the mojang check (204 bc fake player, "closed" is just the script not decrypting the last kick). everything else gets rejected before mojang
+
+wrong verify token on other versions still gets rejected:
+1.8.9 / 1.19.2 / 1.21 / 26.3 -> "Token mismatch!" in the log, connection closed
+
+python3 versions-new.py
+1.7.10   (proto   5): ping ok  | kicked: Authentication failed
+1.8.9    (proto  47): ping ok  | kicked: Authentication failed
+1.12.2   (proto 340): ping ok  | kicked: Authentication failed
+1.16.5   (proto 754): ping ok  | kicked: Authentication failed
+1.18.2   (proto 758): ping ok  | kicked: Authentication failed
+1.19     (proto 759): ping ok  | kicked: Authentication failed
+1.19.2   (proto 760): ping ok  | kicked: Authentication failed
+1.19.4   (proto 762): ping ok  | kicked: Authentication failed
+1.20.4   (proto 765): ping ok  | kicked: Authentication failed
+1.21     (proto 767): ping ok  | kicked: Authentication failed
+1.21.11  (proto 774): ping ok  | kicked: Authentication failed
+26.1     (proto 775): ping ok  | kicked: Authentication failed
+26.3     (proto 777): ping ok  | kicked: Authentication failed
+
+no errors in the log

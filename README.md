@@ -5,6 +5,8 @@
 
 This server is made to let minecraft clients login, authenticate with the microsoft servers and if the authentication handshake is proper, to give them a login code where then it can be use inside any app for the "Login with Minecraft" feature
 
+Supports connection from a range of versions tested: mc1.7.1 - mc26.2
+
 # Requirements
 
 - Python 3.12+
@@ -16,8 +18,8 @@ You can customize the server by modifying the ``server.properties`` file.
 
 #### Keys
 
-KeyName     | Description |                                         | Section |
-------------|-------------|-----------------------------------------|---------|
+KeyName     | Description |                                          Section |
+------------|-------------|--------------------------------------------------|
 motd        | The MOTD of the server                                | [ServerMessages]
 kickmsg     | The message send to players containing the login code | [ServerMessages]
 mp          | Max players displayed for the server                  | [ServerMessages]
@@ -44,4 +46,7 @@ After saving the data to your database you can pull back the code when registeri
 
 # Credits
 
-Credits to Me ( [HG]golden ) and love to HG
+Credits to:
+* Me ( [HG]golden )
+* Al Green fot testing & security checks
+> and love to HG

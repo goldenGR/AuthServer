@@ -22,6 +22,9 @@ from collections import defaultdict
 import sys
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA256
+import struct
 from logTokens import logToken
 import configparser
 import base64
@@ -212,6 +215,12 @@ class AuthServerProtocol(ServerProtocol):
             return
         
         self.display_name = buff.unpack_string()
+        self.chat_public_key = None
+        if 759 <= self.protocol_version <= 760:  # 1.19 - 1.19.2 may send the player's chat key
+            if buff.unpack("?"):
+                buff.unpack("q")                                 # key expiry
+                self.chat_public_key = self.unpack_array(buff)   # player's public key (DER)
+                self.unpack_array(buff)                          # mojang's signature of the key
         buff.read()
         self.verify_token = urandom(4)
 
@@ -240,25 +249,42 @@ class AuthServerProtocol(ServerProtocol):
             verify_token_enc = self.unpack_array(buff)
 
         shared_secret   = cipher.decrypt(shared_secret_enc, None)
-        verify_token    = cipher.decrypt(verify_token_enc, None)
 
-        if shared_secret is None or verify_token is None or len(shared_secret) != 16 or len(verify_token) != 4:
+        if shared_secret is None or len(shared_secret) != 16:
             self.close(Message.from_string("Client handshake failed"))
             return
 
         print("Client responded!")
-        # logg(f"VF: {verify_token} SS: {shared_secret}")
 
-        if verify_token != self.verify_token:
-            print("Token mismatch!")
-            self.close(Message.from_string("Authentication failed"))
-            return
+        if verify_token_enc is not None:
+            verify_token = cipher.decrypt(verify_token_enc, None)
+            if verify_token is None or verify_token != self.verify_token:
+                print("Token mismatch!")
+                self.close(Message.from_string("Authentication failed"))
+                return
+        else:
+            # 1.19-1.19.2 clients with chat keys sign (verify token + salt) with their chat key instead
+            if not self.checkSaltSignature(salt, signature):
+                print("Signature mismatch!")
+                self.close(Message.from_string("Authentication failed"))
+                return
 
         self.cipher.enable(shared_secret)
 
         d = deferToThread(self.checkAuthServer, self.display_name, shared_secret)
         d.addCallback(self._auth_done)
         d.addErrback(self.onAuthError)
+
+    def checkSaltSignature(self, salt, signature) -> bool:
+        if self.chat_public_key is None:
+            return False
+        try:
+            key = RSA.import_key(self.chat_public_key)
+            h = SHA256.new(self.verify_token + struct.pack(">q", salt))
+            pkcs1_15.new(key).verify(h, signature)
+            return True
+        except (ValueError, TypeError, IndexError):
+            return False
 
     def _auth_done(self, ok):
         if ok:
