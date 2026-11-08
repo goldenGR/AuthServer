@@ -1,7 +1,7 @@
 """
     golden's AuthServer by Odysseas Chryssos all right reserved | ody (dot) chryssos (at) gmail (dot) com
     Available for commercial use under goldensAuth License v1.0 - goldenCube Software Foundation
-    License can be found at /license & licenses.goldencube.dev/goldensAuth-License/v1.0
+    License can be found at /license & licenses.goldencube.dev/licences/goldensAuth-License/v1.0
 """
 
 from os import urandom, path
